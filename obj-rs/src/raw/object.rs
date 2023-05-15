@@ -4,7 +4,7 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::io::BufRead;
-use std::mem;
+use std::{iter, mem};
 
 use crate::error::{make_error, ObjResult};
 use crate::raw::lexer::lex;
@@ -290,6 +290,86 @@ pub fn parse_obj<T: BufRead>(input: T) -> ObjResult<RawObj> {
     })
 }
 
+/// Write an obj file
+pub fn write_obj(obj: &'_ RawObj) -> impl Iterator<Item = String> + '_ {
+    let RawObj {
+        name,
+        material_libraries,
+        positions,
+        tex_coords,
+        normals,
+        param_vertices,
+        points,
+        lines,
+        polygons,
+        groups,
+        meshes,
+        smoothing_groups,
+        merging_groups,
+    } = obj;
+
+    let name = name.iter().map(|name| name.to_string());
+
+    let material_libraries = if material_libraries.is_empty() {
+        iter::once("".to_string())
+    } else {
+        iter::once(format!("mtllib {}", material_libraries.join(" ")))
+    };
+
+    let positions = positions
+        .iter()
+        .map(|p| format!("v {} {} {} {}", p.0, p.1, p.2, p.3));
+
+    let tex_coords = tex_coords
+        .iter()
+        .map(|vt| format!("vt {} {} {}", vt.0, vt.1, vt.2));
+
+    let normals = normals
+        .iter()
+        .map(|vn| format!("vn {} {} {}", vn.0, vn.1, vn.2));
+
+    let param_vertices = param_vertices
+        .iter()
+        .map(|vp| format!("vp {} {} {}", vp.0, vp.1, vp.2));
+
+    fn polygon_to_string(polygon: &Polygon) -> String {
+        match polygon {
+            Polygon::P(p) => p
+                .into_iter()
+                .map(|p| format!("{}//", p + 1))
+                .collect::<Vec<_>>()
+                .join(" "),
+            Polygon::PT(pt) => pt
+                .into_iter()
+                .map(|(p, t)| format!("{}/{}/", p + 1, t + 1))
+                .collect::<Vec<_>>()
+                .join(" "),
+            Polygon::PN(pn) => pn
+                .into_iter()
+                .map(|(p, n)| format!("{}//{}", p + 1, n + 1))
+                .collect::<Vec<_>>()
+                .join(" "),
+            Polygon::PTN(ptn) => ptn
+                .into_iter()
+                .map(|(p, t, n)| format!("{}/{}/{}", p + 1, t + 1, n + 1))
+                .collect::<Vec<_>>()
+                .join(" "),
+        }
+    }
+
+    let polygons = polygons
+        .iter()
+        .map(|p| format!("f {}", polygon_to_string(p)));
+
+    name.into_iter()
+        .chain(material_libraries)
+        .chain(positions)
+        .chain(tex_coords)
+        .chain(normals)
+        .chain(param_vertices)
+        .chain(polygons)
+}
+
 /// Splits a string with '/'.
 fn split_vertex_group(input: &str) -> Vec<&str> {
     input.split('/').collect()
@@ -465,6 +545,7 @@ impl Group {
 }
 
 /// Low-level Rust binding for `.obj` format.
+#[derive(Default)]
 pub struct RawObj {
     /// Name of the object.
     pub name: Option<String>,
